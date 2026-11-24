@@ -17,8 +17,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import requests
+from dotenv import load_dotenv
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 
 
 ALLOWED_COMMANDS = {
@@ -29,6 +30,8 @@ ALLOWED_COMMANDS = {
 DEFAULT_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 DEFAULT_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
+
+load_dotenv()
 
 
 @dataclass(frozen=True)
@@ -96,7 +99,7 @@ def transcribe_audio(
         url,
         headers={"xi-api-key": api_key.strip()},
         files={"file": ("recording.wav", audio, "audio/wav")},
-        data={"model_id": "scribe_v1"},
+        data={"model_id": "scribe_v1", "language_code": "vi"},
         timeout=timeout,
     )
     response.raise_for_status()
@@ -209,6 +212,8 @@ def command_response(command: dict[str, str]) -> str:
 class VoiceApp:
     """Tkinter UI; all network, recording, and playback work runs in workers."""
 
+    RECORD_SECONDS = 5.0
+
     def __init__(self, root: tk.Tk, command_output_hook: Optional[Callable[[dict[str, str]], None]] = None):
         self.root = root
         self.command_output_hook = command_output_hook
@@ -218,48 +223,68 @@ class VoiceApp:
         self.root.after(100, self._poll_events)
 
     def _build_ui(self) -> None:
-        self.root.title("Điều khiển đèn bằng giọng nói")
-        self.root.geometry("700x560")
-        frame = ttk.Frame(self.root, padding=12)
+        self.root.title("Trợ lý điều khiển đèn")
+        self.root.geometry("780x720")
+        self.root.minsize(650, 620)
+        self.root.configure(bg="#f4f7fb")
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("Title.TLabel", font=("Segoe UI", 20, "bold"), foreground="#17324d")
+        style.configure("Hint.TLabel", foreground="#526579")
+        style.configure("Mic.TButton", font=("Segoe UI", 15, "bold"), padding=(22, 14), foreground="#ffffff", background="#1769aa")
+        style.map("Mic.TButton", background=[("active", "#0d4f82"), ("disabled", "#9aa9b8")])
+        frame = ttk.Frame(self.root, padding=18)
         frame.pack(fill="both", expand=True)
-        fields = [
-            ("ElevenLabs API key", True), ("ElevenLabs voice ID", False),
-            ("OpenAI-compatible API key", True), ("OpenAI base URL", False),
-            ("Model", False),
-        ]
+        ttk.Label(frame, text="Trợ lý điều khiển đèn", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(frame, text="Nói tiếng Việt hoặc nhập yêu cầu bằng văn bản. Ứng dụng không gửi lệnh đến ESP32.", style="Hint.TLabel").pack(anchor="w", pady=(3, 14))
+
+        credentials = ttk.LabelFrame(frame, text="Cấu hình dịch vụ (chỉ lưu trong bộ nhớ)", padding=10)
+        credentials.pack(fill="x", pady=(0, 12))
+        fields = [("ElevenLabs API key", True), ("ElevenLabs voice ID", False), ("OpenAI-compatible API key", True), ("OpenAI base URL", False), ("Model", False)]
         self.entries: dict[str, ttk.Entry] = {}
-        defaults = [
-            os.getenv("ELEVENLABS_API_KEY", ""),
-            os.getenv("ELEVENLABS_VOICE_ID", ""),
-            os.getenv("OPENAI_API_KEY", ""),
-            os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE),
-            os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        ]
+        defaults = [os.getenv("ELEVENLABS_API_KEY", ""), os.getenv("ELEVENLABS_VOICE_ID", ""), os.getenv("OPENAI_API_KEY", ""), os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE), os.getenv("OPENAI_MODEL", "gpt-4o-mini")]
         for row, ((label, secret), default) in enumerate(zip(fields, defaults)):
-            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
-            entry = ttk.Entry(frame, show="•" if secret else "", width=62)
+            ttk.Label(credentials, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
+            entry = ttk.Entry(credentials, show="•" if secret else "")
             entry.insert(0, default)
-            entry.grid(row=row, column=1, sticky="ew", pady=4)
+            entry.grid(row=row, column=1, sticky="ew", pady=3)
             self.entries[label] = entry
-        frame.columnconfigure(1, weight=1)
-        ttk.Label(frame, text="Typed request (microphone optional)").grid(row=5, column=0, sticky="w", pady=(14, 4))
-        self.typed = ttk.Entry(frame, width=62)
-        self.typed.grid(row=5, column=1, sticky="ew", pady=(14, 4))
-        buttons = ttk.Frame(frame)
-        buttons.grid(row=6, column=0, columnspan=2, pady=8, sticky="w")
-        self.record_button = ttk.Button(buttons, text="Record 5 seconds", command=self._record)
-        self.record_button.pack(side="left", padx=(0, 8))
-        ttk.Button(buttons, text="Interpret typed text", command=self._typed).pack(side="left")
-        ttk.Label(frame, text="Transcript").grid(row=7, column=0, sticky="nw", pady=4)
-        self.transcript = tk.Text(frame, height=4, width=60, state="disabled")
-        self.transcript.grid(row=7, column=1, sticky="nsew", pady=4)
-        ttk.Label(frame, text="Validated command").grid(row=8, column=0, sticky="nw", pady=4)
-        self.command = tk.Text(frame, height=3, width=60, state="disabled")
-        self.command.grid(row=8, column=1, sticky="nsew", pady=4)
-        ttk.Label(frame, text="Status").grid(row=9, column=0, sticky="w", pady=4)
-        self.status = tk.StringVar(value="Ready. Credentials are kept in memory only.")
-        ttk.Label(frame, textvariable=self.status, wraplength=560).grid(row=9, column=1, sticky="w", pady=4)
-        frame.rowconfigure(7, weight=1)
+        credentials.columnconfigure(1, weight=1)
+
+        controls = ttk.LabelFrame(frame, text="Yêu cầu", padding=10)
+        controls.pack(fill="x", pady=(0, 12))
+        self.record_button = ttk.Button(controls, text="🎤  GHI ÂM 5 GIÂY", style="Mic.TButton", command=self._record)
+        self.record_button.pack(side="left", padx=(0, 12))
+        ttk.Label(controls, text="hoặc", style="Hint.TLabel").pack(side="left", padx=(0, 8))
+        self.typed = ttk.Entry(controls)
+        self.typed.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.typed.bind("<Return>", lambda _event: self._typed())
+        self.typed_button = ttk.Button(controls, text="Xử lý văn bản", command=self._typed)
+        self.typed_button.pack(side="left")
+        self.tts_enabled = tk.BooleanVar(value=True)
+        ttk.Checkbutton(controls, text="Đọc phản hồi", variable=self.tts_enabled).pack(anchor="w", pady=(9, 0))
+
+        output = ttk.LabelFrame(frame, text="Kết quả", padding=10)
+        output.pack(fill="both", expand=True)
+        ttk.Label(output, text="Bản chép lời").grid(row=0, column=0, sticky="nw", pady=4)
+        self.transcript = tk.Text(output, height=3, wrap="word", state="disabled", font=("Segoe UI", 11))
+        self.transcript.grid(row=0, column=1, sticky="nsew", pady=4)
+        ttk.Label(output, text="Lệnh đã xác thực").grid(row=1, column=0, sticky="nw", pady=4)
+        self.command = tk.Text(output, height=3, wrap="word", state="disabled", font=("Consolas", 10))
+        self.command.grid(row=1, column=1, sticky="nsew", pady=4)
+        ttk.Label(output, text="Phản hồi tiếng Việt").grid(row=2, column=0, sticky="nw", pady=4)
+        self.response = tk.Text(output, height=3, wrap="word", state="disabled", font=("Segoe UI", 11))
+        self.response.grid(row=2, column=1, sticky="nsew", pady=4)
+        ttk.Label(output, text="Trạng thái").grid(row=3, column=0, sticky="w", pady=8)
+        self.status = tk.StringVar(value="Sẵn sàng. Chưa gửi lệnh đến thiết bị.")
+        ttk.Label(output, textvariable=self.status, wraplength=560).grid(row=3, column=1, sticky="w", pady=8)
+        output.columnconfigure(1, weight=1)
+        output.rowconfigure(0, weight=1)
+        output.rowconfigure(1, weight=1)
+        output.rowconfigure(2, weight=1)
 
     def _config(self) -> AppConfig:
         return AppConfig(
@@ -279,27 +304,57 @@ class VoiceApp:
             return
         self.busy = True
         self.record_button.configure(state="disabled")
-        self.status.set("Working…")
-        threading.Thread(target=worker, daemon=True).start()
+        self.typed_button.configure(state="disabled")
+        for widget in (self.transcript, self.command, self.response):
+            self._set_text(widget, "")
+        self.status.set("Đang xử lý…")
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception as exc:
+            self.busy = False
+            self.record_button.configure(state="normal")
+            self.typed_button.configure(state="normal")
+            self.status.set("Không thể bắt đầu: " + str(exc))
 
     def _typed(self) -> None:
+        if self.busy:
+            return
         text = self.typed.get().strip()
         if not text:
-            self.status.set("Enter a request first.")
+            self.status.set("Vui lòng nhập yêu cầu trước khi xử lý.")
+            self.typed.focus_set()
             return
         config = self._config()
-        self._start(lambda: self._interpret(text, config, do_tts=True))
+        do_tts = self.tts_enabled.get()
+        def worker() -> None:
+            self.events.put(("transcript", text))
+            self.events.put(("status", "Đang phân tích yêu cầu…"))
+            self._interpret(text, config, do_tts=do_tts)
+        self._start(worker)
 
     def _record(self) -> None:
+        if self.busy:
+            return
         config = self._config()
+        do_tts = self.tts_enabled.get()
         def worker() -> None:
             try:
-                self.events.put(("status", "Recording…"))
-                audio = record_wav()
-                text = transcribe_audio(audio, config.elevenlabs_key)
-                self._interpret(text, config, do_tts=True)
+                self.events.put(("status", "Đang ghi âm trong 5 giây…"))
+                audio = record_wav(self.RECORD_SECONDS)
             except Exception as exc:
-                self.events.put(("error", str(exc)))
+                self.events.put(("input_error", "Không thể ghi âm: " + str(exc)))
+                return
+            try:
+                self.events.put(("status", "Đang nhận dạng giọng nói tiếng Việt…"))
+                text = transcribe_audio(audio, config.elevenlabs_key)
+                if not text or not text.strip():
+                    raise ValueError("Không nhận được nội dung giọng nói")
+            except Exception as exc:
+                self.events.put(("input_error", "Không thể nhận dạng giọng nói: " + str(exc)))
+                return
+            self.events.put(("transcript", text))
+            self.events.put(("status", "Đang phân tích yêu cầu…"))
+            self._interpret(text, config, do_tts=do_tts)
         self._start(worker)
 
     def _interpret(self, text: str, config: Optional[AppConfig] = None, do_tts: bool = True) -> None:
@@ -307,13 +362,20 @@ class VoiceApp:
         if config is None:
             config = self._config()
         try:
-            command = interpret_transcript(text, config)
+            if not text or not text.strip():
+                raise ValueError("Vui lòng nhập yêu cầu không để trống.")
+            command = validate_command(interpret_transcript(text, config))
             self.events.put(("result", (text, command)))
             if self.command_output_hook and command["device"] == "light":
                 self.command_output_hook(command)
             if do_tts:
-                audio = synthesize_speech(command_response(command), config)
-                play_wav(audio)
+                self.events.put(("status", "Đang tạo và phát phản hồi…"))
+                try:
+                    audio = synthesize_speech(command_response(command), config)
+                    play_wav(audio)
+                except Exception as exc:
+                    self.events.put(("tts_error", str(exc)))
+                    return
             self.events.put(("status", "Ready. No device command was sent."))
         except Exception as exc:
             self.events.put(("error", str(exc)))
@@ -322,18 +384,26 @@ class VoiceApp:
         try:
             while True:
                 kind, payload = self.events.get_nowait()
-                if kind == "result":
+                if kind == "transcript":
+                    self._set_text(self.transcript, payload)
+                elif kind == "result":
                     text, command = payload
                     self._set_text(self.transcript, text)
                     self._set_text(self.command, json.dumps(command, ensure_ascii=False))
+                    self._set_text(self.response, command_response(command))
                 elif kind == "status":
-                    self.status.set(payload)
+                    self.status.set("Sẵn sàng. Chưa gửi lệnh đến thiết bị." if payload.startswith("Ready") else payload)
+                elif kind == "input_error":
+                    self.status.set(payload + ". Vui lòng nhập yêu cầu vào ô văn bản và chọn Xử lý văn bản để thử lại.")
+                    self.typed.focus_set()
+                elif kind == "tts_error":
+                    self.status.set("Đã xử lý yêu cầu, nhưng không thể đọc phản hồi: " + payload)
                 elif kind == "error":
-                    self.status.set("Error: " + payload)
-                    messagebox.showerror("Voice app error", payload)
-                if kind in {"error", "status"} and (kind == "error" or payload.startswith("Ready")):
+                    self.status.set("Không thể xử lý yêu cầu: " + payload + ". Vui lòng thử lại.")
+                if kind in {"error", "input_error", "tts_error"} or (kind == "status" and payload.startswith("Ready")):
                     self.busy = False
                     self.record_button.configure(state="normal")
+                    self.typed_button.configure(state="normal")
         except queue.Empty:
             pass
         self.root.after(100, self._poll_events)

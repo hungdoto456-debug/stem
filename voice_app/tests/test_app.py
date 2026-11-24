@@ -103,6 +103,7 @@ def test_stt_sends_audio_and_returns_text():
     args, kwargs = session.post.call_args
     assert args[0] == app.DEFAULT_STT_URL
     assert kwargs["files"]["file"][1] == b"wav"
+    assert kwargs["data"]["language_code"] == "vi"
     assert kwargs["headers"]["xi-api-key"] == "key"
     assert kwargs["timeout"] == 3
 
@@ -152,6 +153,40 @@ def test_unsupported_command_never_reaches_hook_or_device(config, monkeypatch):
 
 
 interpret_original = app.interpret_transcript
+
+
+def test_stt_failure_allows_explicit_typed_fallback(config, monkeypatch):
+    instance = app.VoiceApp.__new__(app.VoiceApp)
+    instance.events = queue.Queue()
+    instance._config = lambda: config
+    instance._start = lambda worker: worker()
+    instance.busy = False
+    instance.tts_enabled = Mock()
+    instance.tts_enabled.get.return_value = False
+    instance.typed = Mock()
+    instance.typed.get.return_value = "bật đèn"
+    instance.command_output_hook = None
+    monkeypatch.setattr(app, "record_wav", lambda *args: b"wav")
+    monkeypatch.setattr(app, "transcribe_audio", Mock(side_effect=ValueError("STT failed")))
+    interpret = Mock(return_value={"device": "light", "action": "on"})
+    monkeypatch.setattr(app, "interpret_transcript", interpret)
+    monkeypatch.setattr(app, "synthesize_speech", Mock(return_value=b"audio"))
+    monkeypatch.setattr(app, "play_wav", Mock())
+
+    instance._record()
+    assert instance.events.get_nowait()[0] == "status"
+    assert instance.events.get_nowait()[0] == "status"
+    kind, error = instance.events.get_nowait()
+    assert kind == "input_error" and "STT failed" in error
+    interpret.assert_not_called()
+
+    instance._typed()
+    interpret.assert_called_once_with("bật đèn", config)
+    assert instance.events.get_nowait() == ("transcript", "bật đèn")
+    assert instance.events.get_nowait()[0] == "status"
+    assert instance.events.get_nowait() == ("result", ("bật đèn", {"device": "light", "action": "on"}))
+    app.synthesize_speech.assert_not_called()
+    app.play_wav.assert_not_called()
 
 
 def test_worker_reports_errors_without_hook(config, monkeypatch):

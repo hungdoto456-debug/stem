@@ -1,5 +1,7 @@
 # STEM System - ESP32 Light Control with Display and Web Interface
 
+API HTTP và ví dụ Python: xem [API_ROUTES.md](API_ROUTES.md). API không có xác thực; chỉ sử dụng trên mạng tin cậy.
+
 ## Overview
 
 This project implements an ESP32-based system that:
@@ -28,7 +30,7 @@ This project implements an ESP32-based system that:
 | SSD1306 SCL | SCL | GPIO 22 |
 | DS3231 SDA | SDA | GPIO 21 |
 | DS3231 SCL | SCL | GPIO 22 |
-| Lamp Control | OUT | GPIO 2 |
+| Lamp Control | OUT | GPIO 26 |
 | Status LED | Anode via resistor | GPIO 5 |
 
 Connect the LED cathode to GND and use a suitable series current-limiting resistor.
@@ -153,7 +155,7 @@ GPIO 5 is initialized as an output at startup with a safe LOW default. The
 active-high status LED is steady on while WiFi is connected and blinks at
 500 ms intervals while WiFi is not connected (including AP mode). This is a
 non-blocking indication updated from the main loop; it does not drive or alter
-the GPIO 2 lamp output and does not add delays to WiFi handling. The firmware
+the GPIO 26 lamp output and does not add delays to WiFi handling. The firmware
 constant is `STATUS_LED_PIN = 5` in `src/main.cpp`. The LED remains off during
 setup, including the station connection attempt; indication starts in the main loop.
 
@@ -174,7 +176,7 @@ Or configure via the web interface.
 Edit these constants if using different pins:
 
 ```cpp
-const int LAMP_PIN = 2;     // Lamp control pin
+const int LAMP_PIN = 26;     // Lamp control pin
 const int STATUS_LED_PIN = 5; // Active-high status LED
 const int DAT_PIN = 21;     // I2C SDA pin
 const int SCL_PIN = 22;     // I2C SCL pin
@@ -302,7 +304,7 @@ SSD1306 SDA	SDA	GPIO 21
 SSD1306 SCL	SCL	GPIO 22
 DS3231 SDA	SDA	GPIO 21
 DS3231 SCL	SCL	GPIO 22
-Điều khiển đèn	OUT	GPIO 2
+Điều khiển đèn	OUT	GPIO 26
 LED trạng thái	Anode qua điện trở	GPIO 5
 
 LED active-high: HIGH bật, LOW tắt; cathode nối GND. LED tắt khi khởi tạo,
@@ -388,7 +390,7 @@ const unsigned long DEBOUNCE_DELAY = 15000; // 15 giây
 Hoặc cấu hình trực tiếp thông qua giao diện web.
 6.3. Cấu hình chân kết nối
 Nếu sử dụng các chân GPIO khác, hãy chỉnh sửa các hằng số:
-const int LAMP_PIN = 2;     // Chân điều khiển đèn
+const int LAMP_PIN = 26;     // Chân điều khiển đèn
 const int STATUS_LED_PIN = 5; // LED trạng thái active-high
 const int DAT_PIN = 21;     // Chân I2C SDA
 const int SCL_PIN = 22;     // Chân I2C SCL

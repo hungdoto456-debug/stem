@@ -20,13 +20,13 @@ python -m pip install -r requirements-dev.txt
 pytest -q
 ```
 
-The UI defaults to the environment variables listed in `.env.example` and lets you edit them. The app does not automatically load `.env` files or write credentials to disk; set environment variables in your shell before starting, or enter the values directly in the UI. Never commit real keys. Start the app with `python app.py`.
+The app loads environment variables from an optional `.env` file at startup using `python-dotenv`, and also accepts normal process environment variables. Copy `.env.example` to `.env`, fill in the keys, and start with `python app.py`. Values are shown as editable UI defaults and remain in memory; the app does not write credentials back to disk. Never commit `.env` or real keys.
 
 ## API configuration
 
 The app expects:
 
-- ElevenLabs speech-to-text: `POST https://api.elevenlabs.io/v1/speech-to-text`, multipart field `file`, with `xi-api-key`; the app requests model `scribe_v1`.
+- ElevenLabs speech-to-text: `POST https://api.elevenlabs.io/v1/speech-to-text`, multipart field `file`, with `xi-api-key`; the app requests model `scribe_v1` and explicitly sets `language_code=vi` for Vietnamese.
 - OpenAI-compatible chat: `POST <OPENAI_BASE_URL>/chat/completions`, bearer authentication, and a JSON body containing `model`, `temperature: 0`, and `messages`. A custom base URL may include `/chat/completions`; the app normalizes that suffix before appending it.
 - ElevenLabs text-to-speech: `POST https://api.elevenlabs.io/v1/text-to-speech/<voice_id>` with `xi-api-key`, `output_format=pcm_22050`, and a JSON body. The raw PCM response is wrapped locally as a WAV file for playback.
 
@@ -34,10 +34,10 @@ All network calls use a timeout. Non-2xx responses are surfaced as errors. The a
 
 ## Usage
 
-1. Enter the ElevenLabs key and voice ID, OpenAI-compatible key, base URL, and model.
-2. Use **Interpret typed text** to test without microphone hardware, or record five seconds and transcribe it.
-3. Review the transcript and validated JSON command.
-4. The optional response audio is spoken through the system output device.
+1. Enter the OpenAI-compatible key, base URL, and model. Enter an ElevenLabs key for speech recognition; a voice ID is only needed for response audio.
+2. Type a Vietnamese request, such as `bật đèn`, and choose **Xử lý văn bản**, or choose **Ghi âm 5 giây** to record speech.
+3. Review the transcript, validated JSON command, and Vietnamese response in the interface. Response audio is optional and requires ElevenLabs credentials, a voice ID, and a working output device.
+4. If speech recognition fails or returns no text, enter the request in the typed-input field and interpret it instead; no microphone or STT credentials are needed for typed input.
 
 Only these validated objects are accepted:
 
@@ -46,6 +46,8 @@ Only these validated objects are accepted:
 {"device":"light","action":"off"}
 {"device":"clarification","action":"required"}
 ```
+
+The GUI presents three stages clearly: the recognized or typed **Transcript**, the model output after allowlist validation as **Validated command**, and the resulting Vietnamese **Response** (including the explicit no-device-execution message). STT errors are shown as errors; they do not trigger an accidental command. Use the typed-input fallback explicitly after an STT failure.
 
 The model is instructed to use Vietnamese and return JSON only. Arbitrary text, extra JSON fields, unsupported devices, and unsupported actions are reduced to clarification. No request is sent to an ESP32 endpoint. The `command_output_hook` is an observation/integration hook for a future owner; this project does not provide a device transport.
 

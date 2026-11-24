@@ -21,4 +21,6 @@ int main(){
   assert(l.update(2200,true,300,c));assert(l.update(3199,true,300,c));assert(!l.update(3200,true,300,c));
   Lamp outage;outage.update(0,true,0,c);outage.update(999,false,0,c);assert(!outage.pending);assert(!outage.update(1000,true,0,c));assert(!outage.update(1999,true,0,c));assert(outage.update(2000,true,0,c));
   unsigned v[6];assert(datetime("2024-02-29T23:59:59",v));assert(!datetime("2025-02-29T23:59:59",v));assert(!datetime("2024-04-31T00:00:00",v));assert(!datetime("2024-01-01T24:00:00",v));assert(!datetime("2024-01-01T00:00",v));
+  assert(datetime("2000-01-01T00:00:00",v));assert(datetime("2099-12-31T23:59:59",v));
+  assert(!datetime("2100-01-01T00:00:00",v));assert(!datetime("2024-01-01T00:00:00Z",v));assert(!datetime("2024-01-01 00:00:00",v));assert(!datetime("2024-1a-01T00:00:00",v));
 }
