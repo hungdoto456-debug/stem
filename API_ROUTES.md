@@ -35,9 +35,13 @@ Các ngưỡng đèn là hằng số firmware. Các trường độ ẩm là gi�
 
 ## POST /api/command
 
-Gửi form `application/x-www-form-urlencoded` với **duy nhất** trường `command`, giá trị chính xác một trong `lamp_on`, `lamp_off`, `pump_on`, `pump_off`. Không chấp nhận JSON body. Ví dụ 200 `{"ok":true,"lamp":true}` hoặc `{"ok":true,"pump":false}`. Lệnh sai/thiếu/thừa trường trả 400: `{"ok":false,"reason":"Lệnh không hợp lệ"}`. Nếu bị khóa an toàn trả 409 với `reason` tiếng Việt.
+Gửi form `application/x-www-form-urlencoded` với **duy nhất** trường `command`, giá trị chính xác một trong `lamp_on`, `lamp_off`, `pump_on`, `pump_off`. Không chấp nhận JSON body. Ví dụ 200 `{"ok":true,"lamp":true}` hoặc `{"ok":true,"pump":false}`. Lệnh sai/thiếu/thừa trường hoặc lệnh trong chế độ tự động trả 400.
 
-Đây là lệnh tức thời, không tắt điều khiển tự động: đèn có thể đổi lại sau thời gian trễ 15 giây, bơm tự động có thể bật lại sau lệnh tắt nếu đủ điều kiện (nếu bơm đang chạy, lệnh tắt bắt đầu thời gian nghỉ). `pump_on` yêu cầu cấu hình/hiệu chuẩn đất hợp lệ, mẫu mới dưới 3 giây, không trong thời gian nghỉ và độ ẩm dưới ngưỡng dừng. Bơm vẫn dừng khi dữ liệu cũ, mất hiệu chuẩn, đạt ngưỡng đất + 5 điểm phần trăm hoặc chạy 30 giây; mọi lần dừng bắt đầu nghỉ 5 phút. Gửi lại lệnh bật không đặt lại đồng hồ 30 giây. Thiết bị tự chạy lại khi độ ẩm nhỏ hơn hoặc bằng ngưỡng sau thời gian nghỉ.
+Chọn chế độ thủ công bằng `POST /api/mode` trước khi gửi lệnh. Bơm thủ công bỏ qua kiểm tra cấu hình, cảm biến, độ ẩm và thời gian nghỉ, nhưng vẫn dừng sau 30 giây. Gửi lại lệnh bật khi bơm đang chạy không đặt lại đồng hồ 30 giây. Trong chế độ tự động, bơm vẫn chịu các điều kiện cảm biến và thời gian nghỉ 5 phút.
+
+## POST /api/mode
+
+Gửi đúng một trường form `mode=manual` hoặc `mode=auto`. Chế độ được lưu vào bộ nhớ. Khi chuyển chế độ, trạng thái relay hiện tại được giữ; trong chế độ tự động, ngưỡng cảm biến có thể thay đổi trạng thái sau đó.
 
 ## POST /api/moisture
 
@@ -62,6 +66,7 @@ status.raise_for_status()
 print(status.json())
 print(requests.get(f"{base}/api/config", timeout=5).json())
 
+requests.post(f"{base}/api/mode", data={"mode": "manual"}, timeout=5).raise_for_status()
 response = requests.post(f"{base}/api/command", data={"command": "pump_on"}, timeout=5)
 print(response.status_code, response.json())  # 409: xem reason
 

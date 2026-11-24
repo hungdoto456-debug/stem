@@ -108,6 +108,7 @@ const unsigned long ADC_PERIOD_MS = 1000;
 
 stem::Config controlConfig;
 stem::Pump pump;
+stem::Lamp lamp;
 float waterRaw = NAN, soilRaw = NAN, waterPercent = NAN, soilPercent = NAN;
 unsigned long adcReadAt = 0, moistureSampleAt = 0;
 bool moistureFresh = false, settingsValid = false;
@@ -274,10 +275,10 @@ void sampleMoisture()
 }
 void updatePump()
 {
-  bool enabled = settingsValid && stem::valid(controlConfig) && controlConfig.soilCal == 1 && controlConfig.soilAlert <= 95;
+  bool enabled = settingsValid && stem::valid(controlConfig) && controlConfig.soilAlert <= 95;
   bool before = pump.on;
   bool fresh = moistureFresh && !stem::elapsed(millis(), moistureSampleAt, 3000);
-  pump.update(millis(), enabled, fresh, soilPercent, controlConfig.soilAlert);
+  pump.update(millis(), enabled, fresh, soilPercent, controlConfig.soilAlert, controlConfig);
   if (pump.on != before)
   {
     digitalWrite(PUMP_PIN, pump.on ? LOW : HIGH);
@@ -318,44 +319,39 @@ void kiem_tra()
     return;
 
   unsigned long now = millis();
-  bool mong_muon = trang_thai_den;
+  bool fresh = moistureFresh && isfinite(lux_trung_binh);
 
-  if (!trang_thai_den && lux_trung_binh < ON_THRESHOLD)
-  {
-    mong_muon = true;
-  }
-  else if (trang_thai_den && lux_trung_binh > OFF_THRESHOLD)
-  {
-    mong_muon = false;
-  }
-
-  if (mong_muon == trang_thai_den)
-  {
-    dang_cho = false;
-    return;
-  }
-
-  if (!dang_cho || mong_muon != trang_thai_cho_xu_ly)
-  {
-    trang_thai_cho_xu_ly = mong_muon;
-    diem_bat_dau = now;
-    dang_cho = true;
-    return;
+  if (controlConfig.modeAuto) {
+    bool newLampState = lamp.update(now, fresh, lux_trung_binh, controlConfig);
+    if (newLampState != trang_thai_den) {
+      trang_thai_den = newLampState;
+      digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
+      Serial.print("Đèn: ");
+      Serial.println(trang_thai_den ? "BẬT" : "TẮT");
+    }
+  } else {
+    if (lamp.manualState != trang_thai_den) {
+      trang_thai_den = lamp.manualState;
+      digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
+      Serial.print("Đèn (thủ công): ");
+      Serial.println(trang_thai_den ? "BẬT" : "TẮT");
+    }
   }
 
-  if (now - diem_bat_dau >= DEBOUNCE_DELAY)
-  {
-    trang_thai_den = trang_thai_cho_xu_ly;
-    digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
-    Serial.print("Đèn: ");
-    Serial.println(trang_thai_den ? "BẬT" : "TẮT");
-    dang_cho = false;
-  }
+  dang_cho = false;
 }
 
 // ========== WEB SERVER FUNCTIONS ==========
 String jsonNumber(float x, int digits = 2) { return isfinite(x) ? String(x, digits) : "null"; }
-void sendJson(int code, const String &body) { server.send(code, "application/json; charset=utf-8", body); }
+void sendJson(int code, const String &body)
+{
+  if ((server.uri() == "/command" || server.uri() == "/mode") && code == 200)
+  {
+    server.sendHeader("Location", "/");
+    server.send(303, "text/plain; charset=utf-8", "Đã gửi lệnh");
+  }
+  else server.send(code, "application/json; charset=utf-8", body);
+}
 void apiStatus()
 {
   refreshRTC();
@@ -369,6 +365,7 @@ void apiStatus()
   j += ",\"water\":{\"adc\":" + jsonNumber(waterRaw, 0) + ",\"percent\":" + jsonNumber(waterPercent) + "}";
   j += ",\"soil\":{\"adc\":" + jsonNumber(soilRaw, 0) + ",\"percent\":" + jsonNumber(soilPercent) + "}";
   j += ",\"pump\":" + String(pump.on ? "true" : "false") + ",\"lamp\":" + (digitalRead(LAMP_PIN) == LOW ? "true" : "false");
+  j += ",\"mode\":\"" + String(controlConfig.modeAuto ? "auto" : "manual") + "\"";
   j += ",\"rtc_time\":" + String(rtc_ok ? "\"" : "") + (rtc_ok ? ts : "null") + (rtc_ok ? "\"" : "");
   j += ",\"ds3231_temperature_c\":" + (rtc_ok ? jsonNumber(rtcTemperature) : "null") + ",\"wifi\":{\"mode\":\"" + mode + "\",\"ip\":\"" + ip + "\"}}";
   sendJson(200, j);
@@ -415,6 +412,32 @@ void apiConfig()
   j += ",\"soil_calibrated\":" + String(settingsValid && controlConfig.soilCal ? "true" : "false") + ",\"water_calibrated\":" + (settingsValid && controlConfig.waterCal ? "true" : "false") + "},\"pump_safety\":{\"max_runtime_s\":30,\"cooldown_s\":300,\"hysteresis_percent\":5}}";
   sendJson(200, j);
 }
+void apiMode()
+{
+  if (server.args() != 1 || !server.hasArg("mode"))
+  {
+    sendJson(400, "{\"ok\":false,\"reason\":\"Cần đúng một tham số mode\"}");
+    return;
+  }
+  String mode = server.arg("mode");
+  if (mode != "auto" && mode != "manual")
+  {
+    sendJson(400, "{\"ok\":false,\"reason\":\"mode phải là auto hoặc manual\"}");
+    return;
+  }
+  controlConfig.modeAuto = mode == "auto";
+  lamp.manualState = trang_thai_den;
+  lamp.state = trang_thai_den;
+  lamp.pending = false;
+  pump.manualState = pump.on;
+  if (!saveControlConfig(controlConfig))
+  {
+    sendJson(500, "{\"ok\":false,\"reason\":\"Không thể lưu chế độ\"}");
+    return;
+  }
+  sendJson(200, "{\"ok\":true,\"mode\":\"" + mode + "\"}");
+}
+
 void apiCommand()
 {
   if (server.args() != 1 || !server.hasArg("command"))
@@ -425,7 +448,14 @@ void apiCommand()
   String c = server.arg("command");
   if (c == "lamp_on" || c == "lamp_off")
   {
-    trang_thai_den = c == "lamp_on";
+    if (controlConfig.modeAuto) {
+      sendJson(400, "{\"ok\":false,\"reason\":\"Không thể điều khiển thủ công khi ở chế độ auto\"}");
+      return;
+    }
+    lamp.manualState = c == "lamp_on";
+    lamp.state = lamp.manualState;
+    lamp.pending = false;
+    trang_thai_den = lamp.manualState;
     dang_cho = false;
     digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
     sendJson(200, trang_thai_den ? "{\"ok\":true,\"lamp\":true}" : "{\"ok\":true,\"lamp\":false}");
@@ -433,6 +463,11 @@ void apiCommand()
   }
   if (c == "pump_off")
   {
+    if (controlConfig.modeAuto) {
+      sendJson(400, "{\"ok\":false,\"reason\":\"Không thể điều khiển thủ công khi ở chế độ auto\"}");
+      return;
+    }
+    pump.manualState = false;
     if (pump.on)
     {
       pump.on = false;
@@ -445,31 +480,11 @@ void apiCommand()
   }
   if (c == "pump_on")
   {
-    if (!settingsValid || !stem::valid(controlConfig) || controlConfig.soilCal != 1 || controlConfig.soilAlert > 95)
-    {
-      sendJson(409, "{\"ok\":false,\"reason\":\"Bơm bị khóa: cấu hình hoặc hiệu chuẩn không hợp lệ\"}");
+    if (controlConfig.modeAuto) {
+      sendJson(400, "{\"ok\":false,\"reason\":\"Không thể điều khiển thủ công khi ở chế độ auto\"}");
       return;
     }
-    if (!moistureFresh || stem::elapsed(millis(), moistureSampleAt, 3000) || !isfinite(soilPercent))
-    {
-      sendJson(409, "{\"ok\":false,\"reason\":\"Dữ liệu độ ẩm không khả dụng hoặc đã cũ\"}");
-      return;
-    }
-    if (pump.cooling && !stem::elapsed(millis(), pump.stopped, 300000))
-    {
-      sendJson(409, "{\"ok\":false,\"reason\":\"Bơm đang trong thời gian nghỉ\"}");
-      return;
-    }
-    if (soilPercent >= controlConfig.soilAlert + 5)
-    {
-      sendJson(409, "{\"ok\":false,\"reason\":\"Độ ẩm đã đạt ngưỡng dừng\"}");
-      return;
-    }
-    if (pump.on && stem::elapsed(millis(), pump.started, 30000))
-    {
-      sendJson(409, "{\"ok\":false,\"reason\":\"Đã hết thời gian chạy tối đa\"}");
-      return;
-    }
+    pump.manualState = true;
     pump.cooling = false;
     if (!pump.on)
     {
@@ -531,13 +546,22 @@ void handleRoot()
   html += "</span></div>";
   html += "<div>Ngưỡng BẬT: < 100 lux</div>";
   html += "<div>Ngưỡng TẮT: > 200 lux</div>";
+  html += "<div><form method='POST' action='/command'><button type='submit' name='command' value='lamp_on' " + String(controlConfig.modeAuto ? "disabled" : "") + ">BẬT ĐÈN</button> <button type='submit' name='command' value='lamp_off' " + String(controlConfig.modeAuto ? "disabled" : "") + ">TẮT ĐÈN</button></form></div>";
+  html += "</div>";
+
+  // Mode control card
+  html += "<div class='card'><h2>Chế độ điều khiển</h2>";
+  html += "<div>Chế độ hiện tại: <span id='status-mode'>" + String(controlConfig.modeAuto ? "TỰ ĐỘNG" : "THỦ CÔNG") + "</span></div>";
+  html += "<div><form method='POST' action='/mode'><button type='submit' name='mode' value='auto'>CHUYỂN TỰ ĐỘNG</button> <button type='submit' name='mode' value='manual'>CHUYỂN THỦ CÔNG</button></form></div>";
+  html += "<div>Tự động: sử dụng ngưỡng cảm biến. Thủ công: sử dụng lệnh cuối cùng.</div>";
   html += "</div>";
 
   html += "<div class='card'><h2>Độ ẩm / An toàn bơm</h2>";
   html += "<div>ADC nước: <span id='status-water'>" + (isfinite(waterRaw) ? String(waterRaw, 0) : String("Không khả dụng")) + " (" + (isfinite(waterPercent) ? String(waterPercent, 1) + "%" : String("Không khả dụng")) + ")</span></div>";
   html += "<div>ADC đất: <span id='status-soil'>" + (isfinite(soilRaw) ? String(soilRaw, 0) : String("Không khả dụng")) + " (" + (isfinite(soilPercent) ? String(soilPercent, 1) + "%" : String("Không khả dụng")) + ")</span></div>";
-  html += "<div>Hiệu chuẩn: " + String(settingsValid && controlConfig.soilCal == 1 ? "đất đã hiệu chuẩn" : "CHƯA hiệu chuẩn; bơm bị khóa TẮT") + "</div>";
-  html += "<div>Bơm: <b id='status-pump'>" + String(pump.on ? "BẬT" : "TẮT") + "</b>; chạy tối đa 30 giây; nghỉ 5 phút; trễ 5 điểm phần trăm.</div>";
+  html += "<div>Hiệu chuẩn: " + String(settingsValid && controlConfig.soilCal == 1 ? "đất đã hiệu chuẩn" : "CHƯA hiệu chuẩn; số đo có thể không chính xác") + "</div>";
+  html += "<div>Bơm: <b id='status-pump'>" + String(pump.on ? "BẬT" : "TẮT") + "</b>; chạy tối đa 30 giây. Chế độ tự động: nghỉ 5 phút; trễ 5 điểm phần trăm.</div>";
+  html += "<div><form method='POST' action='/command'><button type='submit' name='command' value='pump_on' " + String(controlConfig.modeAuto ? "disabled" : "") + ">BẬT BƠM</button> <button type='submit' name='command' value='pump_off' " + String(controlConfig.modeAuto ? "disabled" : "") + ">TẮT BƠM</button></form></div>";
   html += "<p>Không thể phát hiện đáng tin cậy lỗi dây ADC hoặc đầu dò bị ngắt/thả nổi. Hãy dùng bộ ngắt độc lập khi cạn nước/chạy khô.</p>";
   html += "<form method='POST' action='/moisture'><label>ADC đất khô <input name='soil_dry' type='number' min='0' max='4095' value='" + String(controlConfig.soilDry) + "'></label><br><label>ADC đất ướt <input name='soil_wet' type='number' min='0' max='4095' value='" + String(controlConfig.soilWet) + "'></label><br><label>ADC nước khô <input name='water_dry' type='number' min='0' max='4095' value='" + String(controlConfig.waterDry) + "'></label><br><label>ADC nước ướt <input name='water_wet' type='number' min='0' max='4095' value='" + String(controlConfig.waterWet) + "'></label><br><label>Bắt đầu bơm khi đất % <input name='soil_alert' type='number' min='0' max='95' value='" + String(controlConfig.soilAlert) + "'></label><br><button>Lưu cài đặt độ ẩm</button></form></div>";
 
@@ -794,11 +818,20 @@ void handleNotFound()
     server.send(404, "text/plain", "Không tìm thấy");
 }
 
+void handleWebControl()
+{
+  if (server.uri() == "/command") apiCommand();
+  else apiMode();
+}
+
 void setupWebServer()
 {
   server.on("/api/status", HTTP_GET, apiStatus);
   server.on("/api/config", HTTP_GET, apiConfig);
   server.on("/api/command", HTTP_POST, apiCommand);
+  server.on("/api/mode", HTTP_POST, apiMode);
+  server.on("/command", HTTP_POST, handleWebControl);
+  server.on("/mode", HTTP_POST, handleWebControl);
   server.on("/api/time", HTTP_POST, apiTime);
   server.on("/api/moisture", HTTP_POST, handleMoisture);
   server.on("/", HTTP_GET, handleRoot);
@@ -821,13 +854,29 @@ void setupWiFi()
   WiFi.persistent(false);
   if (wifiSettings.staSsid[0])
   {
+    Serial.print("Khởi động WiFi chế độ STA, SSID: ");
+    Serial.println(wifiSettings.staSsid);
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiSettings.staSsid, wifiSettings.staPassword);
     unsigned long started = millis();
+    unsigned long lastReport = started;
     while (WiFi.status() != WL_CONNECTED && millis() - started < WIFI_TIMEOUT_MS)
     {
       delay(100);
+      if (millis() - lastReport >= 3000)
+      {
+        lastReport = millis();
+        Serial.printf("Đang kết nối STA (%lu/%lu giây), trạng thái: %d\n",
+                      (lastReport - started) / 1000, WIFI_TIMEOUT_MS / 1000, (int)WiFi.status());
+      }
     }
+    if (WiFi.status() != WL_CONNECTED)
+      Serial.printf("STA không kết nối được sau %lu giây (trạng thái: %d)\n",
+                    WIFI_TIMEOUT_MS / 1000, (int)WiFi.status());
+  }
+  else
+  {
+    Serial.println("SSID STA trống; bỏ qua kết nối STA");
   }
   if (WiFi.status() == WL_CONNECTED)
   {
@@ -836,6 +885,8 @@ void setupWiFi()
   }
   else
   {
+    Serial.print("Chuyển sang chế độ AP, SSID: ");
+    Serial.println(wifiSettings.apSsid);
     WiFi.disconnect();
     WiFi.mode(WIFI_AP);
     wifi_ap_mode = WiFi.softAP(wifiSettings.apSsid, wifiSettings.apPassword);

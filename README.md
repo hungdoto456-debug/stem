@@ -143,11 +143,48 @@ and saved/web settings.
 To change settings, connect to the active network and use **WiFi Configuration**
 in the web UI. Blank password fields retain existing passwords; use the clear
 checkbox to select an open STA network. Saving persists the entire settings record
-and restarts. Passwords are not displayed. To reset to compiled defaults, erase
-the ESP32 flash (for example `pio run -t erase`) and re-upload the firmware;
-this erases all flash data, not just WiFi settings. Reflashing alone does not
-reset them. The built-in AP password is a publicly known example: change it
-before deployment, and restrict access to the unauthenticated web interface.
+and restarts. Passwords are not displayed.
+
+#### Resetting saved data
+
+The firmware stores application data in two separate ESP32 NVS namespaces:
+
+- `stem-wifi`: the saved STA/AP SSIDs and passwords (`settings`).
+- `stem-control`: the saved lamp/pump control configuration (`config`).
+
+To reset **all application settings** while keeping the rest of the flash intact,
+custom firmware can clear both namespaces using `Preferences::clear()` separately
+for `stem-wifi` and `stem-control`, then reboot. This project does not provide a
+reset command for that operation. A whole-chip erase is simpler but destructive.
+
+To reset **all saved data in flash**, use the PlatformIO project command below
+from the project root (for this checkout, `D:\code_esp32\stem`):
+
+```bash
+pio run -t erase
+```
+
+This is destructive: it erases the entire ESP32 flash, including the application,
+NVS, and bootloader. No erase command has been executed as part of this work.
+Afterward, re-upload the firmware (which also re-uploads the bootloader when the
+board/package requires it), for example:
+
+```bash
+pio run -t upload
+```
+
+Reflashing without the erase step does not clear NVS, so saved values continue to
+override compile-time defaults. After a whole-flash erase, the firmware uses the
+compiled defaults: the current example AP SSID is `STEM_THPT_Trang_Dinh` and its
+password is the value compiled in `src/main.cpp`; change that public example before
+deployment. No reset, erase, upload, or credential change was performed here.
+
+NVS-only erasure also removes other data stored in that partition. Its exact
+command depends on the partition table and port, so no unverified address or
+command is suggested here. The web interface is unauthenticated; restrict access
+to the network.
+
+
 
 ### Status LED
 

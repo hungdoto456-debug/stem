@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <initializer_list>
 #include "../include/logic.h"
 // Host: c++ -std=c++11 test/self_check.cpp -o self_check && ./self_check
 int main(){
@@ -20,6 +21,24 @@ int main(){
   assert(l.update(1100,true,300,c));assert(l.update(2100,false,0,c));assert(!l.pending&&l.state);
   assert(l.update(2200,true,300,c));assert(l.update(3199,true,300,c));assert(!l.update(3200,true,300,c));
   Lamp outage;outage.update(0,true,0,c);outage.update(999,false,0,c);assert(!outage.pending);assert(!outage.update(1000,true,0,c));assert(!outage.update(1999,true,0,c));assert(outage.update(2000,true,0,c));
+  c.modeAuto=false;Lamp lamp_manual;lamp_manual.manualState=true;assert(lamp_manual.update(0,false,0,c));assert(lamp_manual.state==true);lamp_manual.manualState=false;assert(!lamp_manual.update(0,false,0,c));assert(lamp_manual.state==false);
+  Pump pump;Config c2;c2.modeAuto=true;
+  assert(!pump.update(0, false, true, 10, 30, c2));
+  assert(!pump.update(1, true, false, 10, 30, c2));
+  assert(pump.update(2, true, true, 30, 30, c2));
+  assert(pump.update(3, true, true, 34, 30, c2));
+  assert(!pump.update(4, true, true, 35, 30, c2));
+  assert(!pump.update(300003, true, true, 10, 30, c2));
+  assert(pump.update(300004, true, true, 10, 30, c2));
+  assert(!pump.update(330004, true, true, 10, 30, c2));
+  Pump stale;c2.modeAuto=true;
+  assert(stale.update(0, true, true, 10, 30, c2));
+  assert(!stale.update(1, true, false, 10, 30, c2));
+  c2.modeAuto=false; Pump pump_manual; pump_manual.on=true; pump_manual.manualState=true; pump_manual.started=100;
+  assert(pump_manual.update(101,false,false,NAN,30,c2));
+  assert(pump_manual.update(30099,false,false,100,30,c2));
+  assert(!pump_manual.update(30100,false,false,NAN,30,c2));
+  assert(!pump_manual.manualState && pump_manual.cooling);
   unsigned v[6];assert(datetime("2024-02-29T23:59:59",v));assert(!datetime("2025-02-29T23:59:59",v));assert(!datetime("2024-04-31T00:00:00",v));assert(!datetime("2024-01-01T24:00:00",v));assert(!datetime("2024-01-01T00:00",v));
   assert(datetime("2000-01-01T00:00:00",v));assert(datetime("2099-12-31T23:59:59",v));
   assert(!datetime("2100-01-01T00:00:00",v));assert(!datetime("2024-01-01T00:00:00Z",v));assert(!datetime("2024-01-01 00:00:00",v));assert(!datetime("2024-1a-01T00:00:00",v));

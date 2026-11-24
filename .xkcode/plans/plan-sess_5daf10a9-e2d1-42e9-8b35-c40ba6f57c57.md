@@ -1,12 +1,13 @@
 ## Context
-The pump and lamp use active-LOW relays. The current firmware only controls the lamp and does not currently read the water or soil sensors. Its existing web configuration form logs values without applying them, so the new moisture threshold needs real storage and validation.
+The firmware already exposes manual lamp and pump commands via POST /api/command, but the web UI and Python Tkinter dashboard lack buttons to send them. The user wants manual controls that remain active until Auto mode is explicitly selected, with pump safety limits still enforced.
 
 ## Implementation
-1. In `src/main.cpp`, assign water level to GPIO35, soil moisture to GPIO34, pump relay to GPIO25 and lamp relay to GPIO26. Initialize both relay outputs HIGH (OFF) before configuring them as outputs. Preserve the lamp’s existing light-based control with inverted relay polarity.
-2. Add periodic ADC1 readings and calibrated soil moisture percentage. Expose dry/wet calibration endpoints and a pump-on moisture threshold in the web UI, validate and persist them with Preferences. Clearly indicate that analog wiring/disconnection cannot be reliably detected by an ADC reading.
-3. Add non-blocking pump control with hysteresis to prevent rapid relay switching, an automatic maximum runtime and cooldown to limit overwatering, and OFF on startup or invalid/unconfigured moisture calibration. Show pump state and safety status on the web page. Treat water-level readings as informational unless correctly calibrated; do not claim disconnected sensors are detected. Document that a separate independent low-water cutoff is needed to protect the pump.
-4. Ensure the web server and sensor sampling continue when BH1750 is unavailable, and keep existing Wi-Fi and RTC functions intact. Update `README.md` with wiring, calibration, active-LOW behavior, and pump safety limitations.
-5. Add tests for pump threshold, hysteresis, startup/calibration lockout, runtime timeout and relay polarity where feasible. Build with PlatformIO; do not upload without a connected board and explicit confirmation.
+1. Add a new manual/auto mode setting to the persisted Config in include/logic.h and firmware main.cpp, defaulting to Auto mode. Preserve existing Config layout and checksum compatibility.
+2. In main.cpp, add a new POST /api/mode endpoint to switch between manual and auto modes. In auto mode, lamp and pump follow existing thresholds; in manual mode, lamp and pump follow the last manual command and ignore thresholds.
+3. Extend the web UI in main.cpp with manual/auto toggle and On/Off buttons for lamp and pump, using the existing /api/command and new /api/mode endpoints. Display current mode and relay states clearly.
+4. Extend the Python Tkinter app with manual/auto toggle and On/Off buttons for lamp and pump, using backend.send_lamp() pattern and a new backend.send_mode() function. Ensure UI updates are passed through the event queue.
+5. Add tests for the new mode switching and manual command behavior in test/self_check.cpp and voice_app/tests/test_backend.py. Preserve existing automatic control tests.
+6. Build the ESP32 firmware and run Python tests. Do not upload.
 
 ## Verification
-Run available automated checks and compile. Hardware checks should use disconnected pump power first to verify relay polarity and boot behavior, then verify calibration, persisted threshold, pump start/stop and timeout with a supervised pump. GPIO34/35 inputs must remain within ESP32 voltage limits. A floating analog input can look valid, so software alone cannot guarantee dry-run or overflow protection.
+Check that manual mode persists across reboot, commands are respected, safety limits still apply to pump, and automatic control resumes when Auto mode is selected. Test both web and Python interfaces.

@@ -34,10 +34,13 @@ def chat(content):
 @pytest.mark.parametrize("value, expected", [
     ('{"device":"light","action":"on"}', {"device": "light", "action": "on"}),
     ({"device": "light", "action": "off"}, {"device": "light", "action": "off"}),
+    ({"device": "pump", "action": "on"}, {"device": "pump", "action": "on"}),
+    ({"device": "pump", "action": "off"}, {"device": "pump", "action": "off"}),
+    ({"device": "mode", "action": "auto"}, {"device": "mode", "action": "auto"}),
+    ({"device": "mode", "action": "manual"}, {"device": "mode", "action": "manual"}),
     (CLARIFY, CLARIFY),
     ("not json", CLARIFY),
     ('```json\n{"device":"light","action":"on"}\n```', CLARIFY),
-    ({"device": "pump", "action": "on"}, CLARIFY),
     ({"device": "light", "action": "toggle"}, CLARIFY),
     ({"device": "light", "action": "on", "execute": True}, CLARIFY),
     ({"device": ["light"], "action": "on"}, CLARIFY),
@@ -136,7 +139,7 @@ def test_tts_missing_credentials_no_request():
 
 def test_unsupported_command_never_reaches_hook_or_device(config, monkeypatch):
     session = Mock()
-    session.post.return_value = response(chat('{"device":"pump","action":"on"}'))
+    session.post.return_value = response(chat('{"device":"invalid","action":"on"}'))
     instance = app.VoiceApp.__new__(app.VoiceApp)
     instance.events = queue.Queue()
     instance._config = lambda: config
@@ -144,11 +147,11 @@ def test_unsupported_command_never_reaches_hook_or_device(config, monkeypatch):
     monkeypatch.setattr(app, "interpret_transcript", lambda text, cfg: app.interpret_transcript_original(text, cfg, session=session))
     monkeypatch.setattr(app, "interpret_transcript_original", interpret_original, raising=False)
     monkeypatch.setattr(app, "play_wav", Mock())
-    instance._interpret("bật bơm", config, do_tts=False)
+    instance._interpret("bật thiết bị không hợp lệ", config, do_tts=False)
     instance.command_output_hook.assert_not_called()
     app.play_wav.assert_not_called()
-    assert instance.events.get_nowait() == ("result", ("bật bơm", CLARIFY))
-    assert "No device" in instance.events.get_nowait()[1]
+    assert instance.events.get_nowait() == ("answer", app.command_response(CLARIFY))
+    assert instance.events.get_nowait()[0] == "status"
     assert session.post.call_count == 1
 
 
@@ -163,10 +166,11 @@ def test_stt_failure_allows_explicit_typed_fallback(config, monkeypatch):
     instance.busy = False
     instance.tts_enabled = Mock()
     instance.tts_enabled.get.return_value = False
+    instance._selected_mic = lambda: None
     instance.typed = Mock()
     instance.typed.get.return_value = "bật đèn"
     instance.command_output_hook = None
-    monkeypatch.setattr(app, "record_wav", lambda *args: b"wav")
+    monkeypatch.setattr(app, "record_wav", lambda *args, **kwargs: b"wav")
     monkeypatch.setattr(app, "transcribe_audio", Mock(side_effect=ValueError("STT failed")))
     interpret = Mock(return_value={"device": "light", "action": "on"})
     monkeypatch.setattr(app, "interpret_transcript", interpret)
@@ -177,14 +181,14 @@ def test_stt_failure_allows_explicit_typed_fallback(config, monkeypatch):
     assert instance.events.get_nowait()[0] == "status"
     assert instance.events.get_nowait()[0] == "status"
     kind, error = instance.events.get_nowait()
-    assert kind == "input_error" and "STT failed" in error
+    assert kind == "input_error" and "nhận dạng" in error
     interpret.assert_not_called()
 
     instance._typed()
     interpret.assert_called_once_with("bật đèn", config)
     assert instance.events.get_nowait() == ("transcript", "bật đèn")
     assert instance.events.get_nowait()[0] == "status"
-    assert instance.events.get_nowait() == ("result", ("bật đèn", {"device": "light", "action": "on"}))
+    assert instance.events.get_nowait()[0] == "answer"
     app.synthesize_speech.assert_not_called()
     app.play_wav.assert_not_called()
 
@@ -196,5 +200,5 @@ def test_worker_reports_errors_without_hook(config, monkeypatch):
     instance.command_output_hook = Mock()
     monkeypatch.setattr(app, "interpret_transcript", Mock(side_effect=ValueError("bad response")))
     instance._interpret("bật đèn", config, do_tts=False)
-    assert instance.events.get_nowait() == ("error", "bad response")
+    assert instance.events.get_nowait() == ("error", "Dịch vụ xử lý không khả dụng")
     instance.command_output_hook.assert_not_called()
