@@ -37,7 +37,7 @@ Các ngưỡng đèn là hằng số firmware. Các trường độ ẩm là gi�
 
 Gửi form `application/x-www-form-urlencoded` với **duy nhất** trường `command`, giá trị chính xác một trong `lamp_on`, `lamp_off`, `pump_on`, `pump_off`. Không chấp nhận JSON body. Ví dụ 200 `{"ok":true,"lamp":true}` hoặc `{"ok":true,"pump":false}`. Lệnh sai/thiếu/thừa trường hoặc lệnh trong chế độ tự động trả 400.
 
-Chọn chế độ thủ công bằng `POST /api/mode` trước khi gửi lệnh. Bơm thủ công bỏ qua kiểm tra cấu hình, cảm biến, độ ẩm và thời gian nghỉ, nhưng vẫn dừng sau 30 giây. Gửi lại lệnh bật khi bơm đang chạy không đặt lại đồng hồ 30 giây. Trong chế độ tự động, bơm vẫn chịu các điều kiện cảm biến và thời gian nghỉ 5 phút.
+Chọn chế độ thủ công bằng `POST /api/mode` trước khi gửi lệnh. Ở chế độ thủ công, `lamp_on`, `lamp_off`, `pump_on`, và `pump_off` được chấp nhận ngay cả khi chưa hiệu chuẩn; lệnh bơm bỏ qua kiểm tra cấu hình, cảm biến, độ ẩm và thời gian nghỉ, nhưng vẫn dừng sau 30 giây. Gửi lại lệnh bật khi bơm đang chạy không đặt lại đồng hồ 30 giây. Trong chế độ tự động, bơm vẫn chịu các điều kiện cảm biến và thời gian nghỉ 5 phút.
 
 ## POST /api/mode
 

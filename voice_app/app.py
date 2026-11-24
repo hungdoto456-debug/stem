@@ -273,67 +273,72 @@ class VoiceApp:
 
     def _build_ui(self) -> None:
         self.root.title("Trợ lý giám sát STEM")
-        self.root.geometry("960x760")
-        self.root.minsize(760, 650)
-        bg, ink, muted, accent, surface = "#f2f6f2", "#142a20", "#425a4c", "#245d42", "#ffffff"
+        self.root.geometry("1024x768")
+        self.root.minsize(640, 600)
+        bg, ink, muted, accent, surface = "#edf3ee", "#183127", "#506a5d", "#246348", "#ffffff"
         self.root.configure(bg=bg)
-        frame = tk.Frame(self.root, bg=bg, padx=24, pady=16)
+        style = ttk.Style(self.root)
+        style.configure("Touch.TButton", font=("Segoe UI", 12, "bold"), padding=(12, 10))
+        style.configure("Touch.TEntry", font=("Segoe UI", 13), padding=8)
+        frame = tk.Frame(self.root, bg=bg, padx=16, pady=12)
         frame.pack(fill="both", expand=True)
-        top = tk.Frame(frame, bg=surface, padx=20, pady=12)
+        top = tk.Frame(frame, bg=surface, padx=18, pady=10)
         top.pack(side="top", fill="x")
         self.connection = tk.StringVar(value="Đang kết nối ESP32…")
-        tk.Label(top, text="VƯỜN THÔNG MINH", bg=surface, fg=accent, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        tk.Label(top, text="VƯỜN THÔNG MINH", bg=surface, fg=accent, font=("Segoe UI", 16, "bold")).pack(anchor="w")
         tk.Label(top, textvariable=self.connection, bg=surface, fg=muted, font=("Segoe UI", 10)).pack(anchor="w")
         self.readings = tk.StringVar(value="Đang tải trạng thái cảm biến và thiết bị…")
-        tk.Label(top, textvariable=self.readings, bg=surface, fg=ink, font=("Segoe UI", 16, "bold"),
-                 justify="left", anchor="w", wraplength=870).pack(fill="x", pady=(8, 0))
+        tk.Label(top, textvariable=self.readings, bg=surface, fg=ink, font=("Segoe UI", 12),
+                 justify="left", anchor="w", wraplength=600).pack(fill="x", pady=(6, 0))
 
-        bottom = tk.Frame(frame, bg=surface, padx=18, pady=12)
+        bottom = tk.Frame(frame, bg=surface, padx=16, pady=10)
         bottom.pack(side="bottom", fill="x", pady=(8, 0))
         tk.Label(bottom, text="YÊU CẦU GẦN NHẤT", bg=surface, fg=muted, font=("Segoe UI", 10, "bold")).pack(anchor="w")
         self.transcript = tk.StringVar(value="Chưa có yêu cầu")
         tk.Label(bottom, textvariable=self.transcript, bg=surface, fg=ink, font=("Segoe UI", 12),
-                 anchor="w", wraplength=850, justify="left").pack(fill="x")
-        self.response = tk.Text(bottom, height=2, wrap="word", state="disabled", relief="flat",
-                                bg=surface, fg=ink, font=("Segoe UI", 11))
+                 anchor="w", wraplength=600, justify="left").pack(fill="x")
+        self.response = tk.Text(bottom, height=3, wrap="word", state="disabled", relief="flat",
+                                bg=surface, fg=ink, font=("Segoe UI", 12))
         self.response.pack(fill="x", pady=(3, 0))
         self.status = tk.StringVar(value="Sẵn sàng")
         tk.Label(bottom, textvariable=self.status, bg=surface, fg=muted, font=("Segoe UI", 10),
-                 anchor="w", wraplength=850).pack(fill="x")
+                 anchor="w", wraplength=600).pack(fill="x")
         self.progress = ttk.Progressbar(bottom, mode="indeterminate")
         self.progress.pack(fill="x", pady=(6, 0))
 
         controls = tk.Frame(frame, bg=bg)
         controls.pack(side="bottom", fill="x", pady=8)
-        for label, device, action in (("Thủ công", "mode", "manual"), ("Tự động", "mode", "auto"),
+        for index, (label, device, action) in enumerate((("Thủ công", "mode", "manual"), ("Tự động", "mode", "auto"),
                                       ("Bật đèn", "light", "on"), ("Tắt đèn", "light", "off"),
-                                      ("Bật bơm", "pump", "on"), ("Tắt bơm", "pump", "off")):
-            ttk.Button(controls, text=label, command=lambda d=device, a=action: self._manual(d, a)).pack(side="left", padx=2)
+                                      ("Bật bơm", "pump", "on"), ("Tắt bơm", "pump", "off"))):
+            ttk.Button(controls, text=label, style="Touch.TButton", command=lambda d=device, a=action: self._manual(d, a)).grid(row=index // 3, column=index % 3, sticky="ew", padx=3, pady=3)
+        for column in range(3):
+            controls.columnconfigure(column, weight=1)
         self.fallback = ttk.Frame(frame)
         self.fallback.pack(side="bottom", fill="x")
-        self.typed = ttk.Entry(self.fallback)
+        self.typed = ttk.Entry(self.fallback, style="Touch.TEntry")
         self.typed.pack(side="left", fill="x", expand=True)
         self.typed.bind("<Return>", lambda _event: self._typed())
-        self.typed_button = ttk.Button(self.fallback, text="Gửi văn bản", command=self._typed)
+        self.typed_button = ttk.Button(self.fallback, text="Gửi", style="Touch.TButton", command=self._typed)
         self.typed_button.pack(side="left", padx=5)
 
         center = tk.Frame(frame, bg=bg)
         center.pack(fill="both", expand=True)
-        self.record_button = tk.Button(center, text="🎙\nGHI ÂM", command=self._record, bg=accent, fg="white",
+        self.record_button = tk.Button(center, text="🎙  CHẠM ĐỂ NÓI", command=self._record, bg=accent, fg="white",
                                        activebackground="#19452f", activeforeground="white", disabledforeground="#d6e2d9",
-                                       font=("Segoe UI Symbol", 20, "bold"), relief="flat", padx=32, pady=14,
+                                       font=("Segoe UI", 16, "bold"), relief="flat", padx=28, pady=14,
                                        cursor="hand2", takefocus=True)
-        self.record_button.pack(expand=True)
+        self.record_button.pack(expand=True, pady=4)
         settings = ttk.Frame(center)
         settings.pack(side="bottom", fill="x", pady=4)
-        ttk.Label(settings, text="Microphone:").pack(side="left")
+        ttk.Label(settings, text="Micro:").pack(side="left")
         self.microphones = []
-        self.mic = ttk.Combobox(settings, state="readonly", width=28)
-        self.mic.pack(side="left", padx=5)
+        self.mic = ttk.Combobox(settings, state="readonly", width=18)
+        self.mic.pack(side="left", padx=5, fill="x", expand=True)
         ttk.Button(settings, text="Làm mới", command=self._refresh_mics).pack(side="left")
         self.test_button = ttk.Button(settings, text="Thử micro", command=self._test_mic)
         self.test_button.pack(side="left", padx=4)
-        self.tts_enabled = tk.BooleanVar(value=False)
+        self.tts_enabled = tk.BooleanVar(value=True)
         ttk.Checkbutton(settings, text="Đọc phản hồi", variable=self.tts_enabled).pack(side="left", padx=5)
         self._refresh_mics()
 
@@ -346,10 +351,10 @@ class VoiceApp:
                 from backend import send_lamp, send_mode, send_pump
                 if device == "light":
                     send_lamp(os.getenv("ESP32_BASE_URL", ""), action)
-                    text = "ESP32 xác nhận đã " + ("bật" if action == "on" else "tắt") + " đèn."
+                    text = "ESP32 đã nhận lệnh " + ("bật" if action == "on" else "tắt") + " đèn; chưa xác nhận tải thực tế."
                 elif device == "pump":
                     send_pump(os.getenv("ESP32_BASE_URL", ""), action)
-                    text = "ESP32 xác nhận đã " + ("bật" if action == "on" else "tắt") + " bơm."
+                    text = "ESP32 đã nhận lệnh " + ("bật" if action == "on" else "tắt") + " bơm; tự dừng sau 30 giây. Cần bộ ngắt cạn độc lập; chưa xác nhận tải thực tế."
                 else:
                     send_mode(os.getenv("ESP32_BASE_URL", ""), action)
                     text = "ESP32 xác nhận đã chuyển chế độ " + ("tự động" if action == "auto" else "thủ công") + "."
@@ -482,15 +487,15 @@ class VoiceApp:
             if device == "light":
                 try:
                     send_lamp(os.getenv("ESP32_BASE_URL", ""), command["action"])
-                    response = "ESP32 xác nhận đã " + ("bật" if command["action"] == "on" else "tắt") + " đèn; điều khiển tự động có thể thay đổi lại."
+                    response = "ESP32 đã nhận lệnh " + ("bật" if command["action"] == "on" else "tắt") + " đèn; chưa xác nhận tải thực tế."
                 except Exception:
-                    response = "Không xác nhận được lệnh đèn; trạng thái thực tế chưa rõ."
+                    response = "Không xác nhận được lệnh đèn; kiểm tra kết nối và chọn chế độ thủ công. Trạng thái thực tế chưa rõ."
             elif device == "pump":
                 try:
                     send_pump(os.getenv("ESP32_BASE_URL", ""), command["action"])
-                    response = "ESP32 xác nhận đã " + ("bật" if command["action"] == "on" else "tắt") + " bơm; điều khiển tự động có thể thay đổi lại."
+                    response = "ESP32 đã nhận lệnh " + ("bật" if command["action"] == "on" else "tắt") + " bơm; chưa xác nhận tải thực tế. Bơm thủ công tự dừng sau 30 giây và cần bộ ngắt cạn độc lập."
                 except Exception:
-                    response = "Không xác nhận được lệnh bơm; trạng thái thực tế chưa rõ."
+                    response = "Không xác nhận được lệnh bơm; chọn chế độ thủ công trước. Trạng thái thực tế chưa rõ."
             elif device == "mode":
                 try:
                     send_mode(os.getenv("ESP32_BASE_URL", ""), command["action"])
@@ -500,9 +505,11 @@ class VoiceApp:
             elif device == "sensor":
                 try:
                     data = fetch_status(os.getenv("ESP32_BASE_URL", ""))
-                    response = (f"Ánh sáng: {data['light'].get('lux')} lux; "
-                                f"độ ẩm đất: {data['soil'].get('percent')}%; nước: {data['water'].get('percent')}%; "
-                                f"nhiệt độ chip DS3231: {data.get('ds3231_temperature_c')} °C.")
+                    def reading(value: Any, unit: str) -> str:
+                        return f"{value} {unit}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "không khả dụng"
+                    response = (f"Ánh sáng: {reading(data['light'].get('lux'), 'lux')}; "
+                                f"độ ẩm đất: {reading(data['soil'].get('percent'), '%')}; nước: {reading(data['water'].get('percent'), '%')}; "
+                                f"nhiệt độ chip DS3231, không phải nhiệt độ không khí: {reading(data.get('ds3231_temperature_c'), 'độ C')}.")
                 except Exception:
                     response = "Không thể đọc cảm biến ESP32."
             elif device == "weather":

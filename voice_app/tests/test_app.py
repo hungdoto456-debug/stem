@@ -193,6 +193,57 @@ def test_stt_failure_allows_explicit_typed_fallback(config, monkeypatch):
     app.play_wav.assert_not_called()
 
 
+@pytest.mark.parametrize("command, backend_name, result", [
+    ({"device": "light", "action": "on"}, "send_lamp", {"ok": True, "lamp": True}),
+    ({"device": "pump", "action": "off"}, "send_pump", {"ok": True, "pump": False}),
+])
+def test_interpreted_control_is_displayed_and_spoken(config, monkeypatch, command, backend_name, result):
+    import backend
+    instance = app.VoiceApp.__new__(app.VoiceApp)
+    instance.events = queue.Queue()
+    instance.command_output_hook = None
+    monkeypatch.setattr(app, "interpret_transcript", lambda text, cfg: command)
+    send = Mock(return_value=result)
+    monkeypatch.setattr(backend, backend_name, send)
+    synthesize = Mock(return_value=b"audio")
+    playback = Mock()
+    monkeypatch.setattr(app, "synthesize_speech", synthesize)
+    monkeypatch.setattr(app, "play_wav", playback)
+    instance._interpret("yêu cầu", config, do_tts=True)
+    kind, answer = instance.events.get_nowait()
+    assert kind == "answer" and "ESP32" in answer
+    synthesize.assert_called_once_with(answer, config)
+    playback.assert_called_once_with(b"audio")
+    send.assert_called_once()
+
+
+def test_sensor_response_handles_missing_values(config, monkeypatch):
+    import backend
+    instance = app.VoiceApp.__new__(app.VoiceApp)
+    instance.events = queue.Queue()
+    instance.command_output_hook = None
+    monkeypatch.setattr(app, "interpret_transcript", lambda text, cfg: {"device": "sensor", "action": "read"})
+    monkeypatch.setattr(backend, "fetch_status", lambda url: {"light": {"lux": None}, "soil": {"percent": 42}, "water": {"percent": None}})
+    instance._interpret("cảm biến", config, do_tts=False)
+    kind, answer = instance.events.get_nowait()
+    assert kind == "answer" and "không khả dụng" in answer and "42" in answer
+
+
+def test_weather_response_is_spoken(config, monkeypatch):
+    import backend
+    instance = app.VoiceApp.__new__(app.VoiceApp)
+    instance.events = queue.Queue()
+    instance.command_output_hook = None
+    monkeypatch.setattr(app, "interpret_transcript", lambda text, cfg: {"device": "weather", "action": "forecast"})
+    monkeypatch.setattr(backend, "fetch_weather", lambda lat, lon: "Dự báo hôm nay: có mưa.")
+    synthesize = Mock(return_value=b"audio")
+    monkeypatch.setattr(app, "synthesize_speech", synthesize)
+    monkeypatch.setattr(app, "play_wav", Mock())
+    instance._interpret("thời tiết", config, do_tts=True)
+    assert instance.events.get_nowait() == ("answer", "Dự báo hôm nay: có mưa.")
+    synthesize.assert_called_once_with("Dự báo hôm nay: có mưa.", config)
+
+
 def test_worker_reports_errors_without_hook(config, monkeypatch):
     instance = app.VoiceApp.__new__(app.VoiceApp)
     instance.events = queue.Queue()

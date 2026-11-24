@@ -101,10 +101,10 @@ const int PUMP_PIN = 25;
 const int STATUS_LED_PIN = 5; // Active-high system status LED
 const int DAT_PIN = 21;       // SDA
 const int SCL_PIN = 22;       // I2C
-const float ON_THRESHOLD = 100;
-const float OFF_THRESHOLD = 200;
-const unsigned long DEBOUNCE_DELAY = 5000; // 15 seconds
-const unsigned long ADC_PERIOD_MS = 1000;
+const unsigned long ADC_PERIOD_MS = 250;
+// BH1750 high-resolution conversions can take up to 180 ms.
+const unsigned long LIGHT_PERIOD_MS = 250;
+const unsigned long LIGHT_RETRY_MS = 5000;
 
 stem::Config controlConfig;
 stem::Pump pump;
@@ -113,7 +113,6 @@ float waterRaw = NAN, soilRaw = NAN, waterPercent = NAN, soilPercent = NAN;
 unsigned long adcReadAt = 0, moistureSampleAt = 0;
 bool moistureFresh = false, settingsValid = false;
 Preferences controlPreferences;
-const uint32_t CONTROL_MAGIC = 0x5354454d;
 
 // ========== GLOBAL VARIABLES ==========
 BH1750 lightsensor;
@@ -127,10 +126,7 @@ bool trang_thai_den = false;
 bool cam_bien_ok = false;
 bool rtc_ok = false;
 
-unsigned long lan_doc_cuoi = 0;
-unsigned long diem_bat_dau = 0;
-bool dang_cho = false;
-bool trang_thai_cho_xu_ly = false;
+unsigned long lightReadAt = 0;
 
 // Moving average for light sensor; only populated samples contribute.
 const int so_mau = 3;
@@ -273,6 +269,18 @@ void sampleMoisture()
   moistureSampleAt = now;
   moistureFresh = true;
 }
+void setLampOutput(bool on)
+{
+  trang_thai_den = on;
+  digitalWrite(LAMP_PIN, on ? LOW : HIGH);
+}
+
+void setPumpOutput(bool on)
+{
+  pump.on = on;
+  digitalWrite(PUMP_PIN, on ? LOW : HIGH);
+}
+
 void updatePump()
 {
   bool enabled = settingsValid && stem::valid(controlConfig) && controlConfig.soilAlert <= 95;
@@ -281,12 +289,12 @@ void updatePump()
   pump.update(millis(), enabled, fresh, soilPercent, controlConfig.soilAlert, controlConfig);
   if (pump.on != before)
   {
-    digitalWrite(PUMP_PIN, pump.on ? LOW : HIGH);
+    setPumpOutput(pump.on);
     Serial.println(pump.on ? "Bơm BẬT" : "Bơm TẮT");
   }
 }
 
-void cam_bien()
+void readLightSensor()
 {
   float lux_moi = lightsensor.readLightLevel();
 
@@ -297,7 +305,6 @@ void cam_bien()
     lightInitialized = false;
     lux = lux_trung_binh = NAN;
     luxAverage.clear();
-    dang_cho = false;
     return;
   }
 
@@ -313,9 +320,29 @@ void cam_bien()
   Serial.println(" lux");
 }
 
-void kiem_tra()
+void updateLightSensor()
 {
-  if (!cam_bien_ok)
+  if (!lightInitialized)
+  {
+    if (millis() - lightReadAt >= LIGHT_RETRY_MS)
+    {
+      lightReadAt = millis();
+      lightInitialized = lightsensor.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
+      cam_bien_ok = false;
+      lux = lux_trung_binh = NAN;
+      luxAverage.clear();
+    }
+  }
+  else if (millis() - lightReadAt >= LIGHT_PERIOD_MS)
+  {
+    lightReadAt = millis();
+    readLightSensor();
+  }
+}
+
+void updateLampControl()
+{
+  if (controlConfig.modeAuto && !cam_bien_ok)
     return;
 
   unsigned long now = millis();
@@ -324,21 +351,18 @@ void kiem_tra()
   if (controlConfig.modeAuto) {
     bool newLampState = lamp.update(now, fresh, lux_trung_binh, controlConfig);
     if (newLampState != trang_thai_den) {
-      trang_thai_den = newLampState;
-      digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
+      setLampOutput(newLampState);
       Serial.print("Đèn: ");
       Serial.println(trang_thai_den ? "BẬT" : "TẮT");
     }
   } else {
     if (lamp.manualState != trang_thai_den) {
-      trang_thai_den = lamp.manualState;
-      digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
+      setLampOutput(lamp.manualState);
       Serial.print("Đèn (thủ công): ");
       Serial.println(trang_thai_den ? "BẬT" : "TẮT");
     }
   }
 
-  dang_cho = false;
 }
 
 // ========== WEB SERVER FUNCTIONS ==========
@@ -455,9 +479,7 @@ void apiCommand()
     lamp.manualState = c == "lamp_on";
     lamp.state = lamp.manualState;
     lamp.pending = false;
-    trang_thai_den = lamp.manualState;
-    dang_cho = false;
-    digitalWrite(LAMP_PIN, trang_thai_den ? LOW : HIGH);
+    setLampOutput(lamp.manualState);
     sendJson(200, trang_thai_den ? "{\"ok\":true,\"lamp\":true}" : "{\"ok\":true,\"lamp\":false}");
     return;
   }
@@ -470,10 +492,9 @@ void apiCommand()
     pump.manualState = false;
     if (pump.on)
     {
-      pump.on = false;
       pump.cooling = true;
       pump.stopped = millis();
-      digitalWrite(PUMP_PIN, HIGH);
+      setPumpOutput(false);
     }
     sendJson(200, "{\"ok\":true,\"pump\":false}");
     return;
@@ -488,9 +509,8 @@ void apiCommand()
     pump.cooling = false;
     if (!pump.on)
     {
-      pump.on = true;
       pump.started = millis();
-      digitalWrite(PUMP_PIN, LOW);
+      setPumpOutput(true);
     }
     sendJson(200, "{\"ok\":true,\"pump\":true}");
     return;
@@ -553,7 +573,7 @@ void handleRoot()
   html += "<div class='card'><h2>Chế độ điều khiển</h2>";
   html += "<div>Chế độ hiện tại: <span id='status-mode'>" + String(controlConfig.modeAuto ? "TỰ ĐỘNG" : "THỦ CÔNG") + "</span></div>";
   html += "<div><form method='POST' action='/mode'><button type='submit' name='mode' value='auto'>CHUYỂN TỰ ĐỘNG</button> <button type='submit' name='mode' value='manual'>CHUYỂN THỦ CÔNG</button></form></div>";
-  html += "<div>Tự động: sử dụng ngưỡng cảm biến. Thủ công: sử dụng lệnh cuối cùng.</div>";
+  html += "<div>Tự động: sử dụng ngưỡng cảm biến. Thủ công: bật/tắt đèn và bơm không cần hiệu chuẩn; chọn THỦ CÔNG trước.</div>";
   html += "</div>";
 
   html += "<div class='card'><h2>Độ ẩm / An toàn bơm</h2>";
@@ -939,7 +959,7 @@ void setup()
 
   // Initialize BH1750 light sensor
   lightInitialized = lightsensor.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
-  lan_doc_cuoi = millis();
+  lightReadAt = millis();
   if (!lightInitialized)
   {
     Serial.println("Không tìm thấy BH1750!");
@@ -967,26 +987,8 @@ void loop()
   updatePump();
   sampleMoisture();
   updatePump();
-  // Handle sensor reading
-  if (!lightInitialized)
-  {
-    if (millis() - lan_doc_cuoi >= 5000)
-    {
-      lan_doc_cuoi = millis();
-      lightInitialized = lightsensor.begin(BH1750::CONTINUOUS_HIGH_RES_MODE);
-      cam_bien_ok = false;
-      lux = lux_trung_binh = NAN;
-      luxAverage.clear();
-      dang_cho = false;
-    }
-  }
-  else if (millis() - lan_doc_cuoi >= 2000)
-  {
-    lan_doc_cuoi = millis();
-    cam_bien();
-  }
-
-  kiem_tra();
+  updateLightSensor();
+  updateLampControl();
 
   server.handleClient();
   updateStatusLed();
